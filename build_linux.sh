@@ -1,10 +1,5 @@
 #!/bin/sh
-# FFmpegAVS2 build script
-#
-# Copyright (c) 2018~ Yiqun Xu
-#               2018~ Falei Luo
-#               2018~ Huiwen Ren
-#               2018~ VCL, NELVT, PKU
+# FFmpegAVS2 build script (MODIFIED FOR LOCAL ZIP FILES)
 
 touch build.log
 echo "BUILD TIME: $(date +%Y-%m-%d)" > build.log
@@ -28,46 +23,50 @@ checkfail()
 printLog()
 {
     echo ">>> $@" >> $build_dir/build.log
-    $@ >> $build_dir/build.log
+    $@ >> $build_dir/build.log 2>&1
 }
 
-###############################
-# Sync repositories
-###############################
-checkGitSources()
+# NEW FUNCTION: To extract ZIP files
+extractZipSource()
 {
+    local zip_file=$1         # e.g., FFmpegAVS2-n3.4_avs2.zip
+    local expected_dir=$2     # e.g., FFmpegAVS2
+    local extracted_dir=$3    # e.g., FFmpegAVS2-n3.4_avs2
+
     echo ">>>>"
     echo " -------------------------------------------------------------------------- "
-    echo " dir: $1 "
-    echo " url: $2 "
+    echo " Unpacking: $zip_file "
     echo " -------------------------------------------------------------------------- "
-    if [ ! -d $1 ]; then
-        echo "$1 source not found, cloning"
-        git clone $2 $1  || checkfail "$1 source: git clone failed"
-    else
-        echo "$1 source found!"
+
+    if [ ! -f "$zip_file" ]; then
+        checkfail "ZIP file $zip_file not found. Please download it first."
     fi
-    echo "synchronizing sources..."
-    curdir=$(pwd)
-    cd $1
-    git pull
-    cd $curdir
+
+    if [ -d "$expected_dir" ]; then
+        echo "Directory $expected_dir already exists. Skipping extraction."
+    else
+        echo "Extracting $zip_file..."
+        unzip -q $zip_file || checkfail "unzip $zip_file failed"
+        echo "Renaming $extracted_dir to $expected_dir..."
+        mv "$extracted_dir" "$expected_dir" || checkfail "mv $extracted_dir failed"
+    fi
     echo "success..."
 }
 
-###############################
-## install pkg-config
-#### for ubuntu
-###############################
-# sudo apt-get install pkg-config
 
 # current dir
 build_dir=`pwd`
 
-# sync sources
-checkGitSources FFmpegAVS2  https://github.com/pkuvcl/FFmpegAVS2.git
-checkGitSources xavs2       https://github.com/pkuvcl/xavs2.git
-checkGitSources davs2       https://github.com/pkuvcl/davs2.git
+# Clean up old directories to ensure a fresh build
+echo "$msg_color[Cleaning up old directories...]$reset_color"
+rm -rf FFmpegAVS2 xavs2 davs2 avs2_lib
+echo "Cleanup complete."
+
+# Unpack sources from local ZIP files
+extractZipSource "FFmpegAVS2-n3.4_avs2.zip" "FFmpegAVS2" "FFmpegAVS2-n3.4_avs2"
+extractZipSource "xavs2-master.zip" "xavs2" "xavs2-master"
+extractZipSource "davs2-master.zip" "davs2" "davs2-master"
+
 
 ###############################
 # build xavs2 encoder
@@ -76,7 +75,8 @@ echo "$msg_color[Start building xAVS2 encoder]$reset_color"
 cd xavs2/build/linux  # xAVS2 directory
 printLog ./configure --prefix=$build_dir/avs2_lib \
             --enable-pic \
-            --enable-shared
+            --enable-shared \
+            --disable-asm
 printLog make -j8 || checkfail "make failed"
 printLog make install
 cd -
@@ -88,7 +88,8 @@ echo "$msg_color[Start building dAVS2 decoder]$reset_color"
 cd davs2/build/linux  # dAVS2 directory
 printLog ./configure --prefix=$build_dir/avs2_lib \
             --enable-pic \
-            --enable-shared
+            --enable-shared \
+            --disable-asm
 printLog make -j8 || checkfail "make failed"
 printLog make install
 cd -
@@ -98,7 +99,9 @@ cd -
 ###############################
 echo "$msg_color[Start building FFmpegAVS2]$reset_color"
 cd FFmpegAVS2
-git checkout avs2
+
+# REMOVED: git checkout is no longer needed as we are using the correct source from the ZIP
+
 export PKG_CONFIG_PATH=$build_dir/avs2_lib/lib/pkgconfig
 printLog ./configure \
   --prefix=$build_dir/avs2_lib \
@@ -106,11 +109,13 @@ printLog ./configure \
   --enable-libxavs2 \
   --enable-libdavs2 \
   --enable-shared \
-  --enable-static
+  --enable-static \
+  --disable-asm   # Disable assembly to prevent compilation errors on modern systems
 
 printLog make -j8 || checkfail "make failed"
 printLog make install
-# tar -czvf ./ffmpeg_lib.tar.gz ./install
 cd -
 
-echo "Everything done!"
+echo ""
+echo "$msg_color""Everything done!$reset_color"
+echo "The compiled libraries and executables are in the 'avs2_lib' directory."
